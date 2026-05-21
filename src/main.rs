@@ -1,6 +1,4 @@
-use std::io::Cursor;
-
-use mini_lsm::{Op, Record};
+use mini_lsm::{Op, Record, Wal};
 
 fn main() {
     let record = Record {
@@ -9,17 +7,6 @@ fn main() {
         value: b"world".to_vec(),
     };
 
-    let bytes = record.encode();
-    println!("encoded {} bytes: {:?}", bytes.len(), bytes);
-
-    let decoded = Record::decode(&mut Cursor::new(&bytes))
-        .expect("decode error")
-        .expect("unexpected EOF");
-
-    println!(
-        "decoded: op={:?} key={:?} value={:?}",
-        decoded.op, decoded.key, decoded.value
-    );
-    assert_eq!(decoded, record);
-    println!("round-trip OK");
+    let mut wal = Wal::new("wal.log").expect("Failed to create WAL");
+    wal.append(&record).expect("Failed to append to WAL");
 }
