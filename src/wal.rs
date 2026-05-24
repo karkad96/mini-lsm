@@ -12,7 +12,7 @@ pub enum SyncMode {
 }
 
 pub struct Wal {
-    file: BufWriter<File>,
+    file: File,
     path: PathBuf,
     size: u64,
     sync_mode: SyncMode,
@@ -31,7 +31,7 @@ impl Wal {
             .open(path)?;
         let size = file.metadata()?.len();
         Ok(Wal {
-            file: BufWriter::new(file),
+            file,
             path: path.to_path_buf(),
             size,
             sync_mode,
@@ -51,25 +51,24 @@ impl Wal {
 
         self.file.write_all(&data)?;
         self.size += data.len() as u64;
-        self.file.flush()?;
 
         if self.sync_mode == SyncMode::FsyncAlways {
-            self.file.get_ref().sync_data()?;
+            self.file.sync_data()?;
         }
         Ok(())
     }
 
     pub fn append_batch(&mut self, records: &[Record]) -> std::io::Result<()> {
+        let mut buf = Vec::new();
         for record in records {
-            let data = record.encode();
-            self.file.write_all(&data)?;
-            self.size += data.len() as u64;
+            buf.extend(record.encode());
         }
 
-        self.file.flush()?;
+        self.file.write_all(&buf)?;
+        self.size += buf.len() as u64;
 
         if self.sync_mode != SyncMode::FsyncNever {
-            self.file.get_ref().sync_data()?;
+            self.file.sync_data()?;
         }
         Ok(())
     }
@@ -90,8 +89,6 @@ impl Wal {
     }
 
     pub fn delete(self) -> std::io::Result<()> {
-        drop(self.file);
-
         std::fs::remove_file(&self.path)
     }
 }
