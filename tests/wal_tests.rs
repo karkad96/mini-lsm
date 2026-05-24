@@ -14,11 +14,19 @@ fn tmp_path() -> String {
 }
 
 fn put(key: &[u8], value: &[u8]) -> Record {
-    Record { op: Op::Put, key: key.to_vec(), value: value.to_vec() }
+    Record {
+        op: Op::Put,
+        key: key.to_vec(),
+        value: value.to_vec(),
+    }
 }
 
 fn del(key: &[u8]) -> Record {
-    Record { op: Op::Delete, key: key.to_vec(), value: vec![] }
+    Record {
+        op: Op::Delete,
+        key: key.to_vec(),
+        value: vec![],
+    }
 }
 
 #[test]
@@ -146,7 +154,10 @@ fn recover_truncated_last_record_is_silently_skipped() {
     wal.append(&put(b"good", b"record")).unwrap();
     drop(wal);
 
-    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
     f.write_all(&[0x00, 0x03, 0x00, 0x00, 0x00]).unwrap();
 
     assert_eq!(Wal::recover(&path).unwrap(), vec![put(b"good", b"record")]);
@@ -277,7 +288,11 @@ fn never_mode_recovers_correctly() {
 
 #[test]
 fn sync_mode_does_not_affect_recovered_data() {
-    let modes = [SyncMode::FsyncAlways, SyncMode::FsyncOnBatch, SyncMode::FsyncNever];
+    let modes = [
+        SyncMode::FsyncAlways,
+        SyncMode::FsyncOnBatch,
+        SyncMode::FsyncNever,
+    ];
     let recs = vec![put(b"k1", b"v1"), del(b"k2"), put(b"k3", b"v3")];
 
     let paths: Vec<String> = modes.iter().map(|_| tmp_path()).collect();
@@ -286,10 +301,7 @@ fn sync_mode_does_not_affect_recovered_data() {
         wal.append_batch(&recs).unwrap();
     }
 
-    let recovered: Vec<Vec<Record>> = paths
-        .iter()
-        .map(|p| Wal::recover(p).unwrap())
-        .collect();
+    let recovered: Vec<Vec<Record>> = paths.iter().map(|p| Wal::recover(p).unwrap()).collect();
 
     assert!(recovered.windows(2).all(|w| w[0] == w[1]));
 
@@ -306,10 +318,7 @@ fn iter_yields_same_records_as_recover() {
     wal.append_batch(&recs).unwrap();
     drop(wal);
 
-    let from_iter: Vec<Record> = WalIter::open(&path)
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
+    let from_iter: Vec<Record> = WalIter::open(&path).unwrap().map(|r| r.unwrap()).collect();
 
     assert_eq!(from_iter, Wal::recover(&path).unwrap());
     std::fs::remove_file(&path).ok();
@@ -330,10 +339,14 @@ fn iter_stops_at_truncated_record() {
     wal.append(&put(b"good", b"record")).unwrap();
     drop(wal);
 
-    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
     f.write_all(&[0x00, 0x03, 0x00, 0x00, 0x00]).unwrap();
 
-    let records: Vec<Record> = WalIter::open(&path).unwrap()
+    let records: Vec<Record> = WalIter::open(&path)
+        .unwrap()
         .take_while(|r| r.is_ok())
         .map(|r| r.unwrap())
         .collect();

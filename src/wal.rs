@@ -1,5 +1,5 @@
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write, BufReader};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{Record, RecordError};
@@ -25,10 +25,7 @@ impl Wal {
 
     pub fn with_sync_mode<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> std::io::Result<Self> {
         let path = path.as_ref();
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
         let size = file.metadata()?.len();
         Ok(Wal {
             file,
@@ -100,7 +97,9 @@ pub struct WalIter {
 impl WalIter {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RecordError> {
         let file = File::open(path)?;
-        Ok(WalIter { reader: BufReader::new(file) })
+        Ok(WalIter {
+            reader: BufReader::new(file),
+        })
     }
 }
 
