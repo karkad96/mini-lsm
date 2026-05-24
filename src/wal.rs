@@ -1,14 +1,14 @@
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Write, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::{Record, RecordError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
-    Always,
-    BatchOnly,
-    Never,
+    FsyncAlways,
+    FsyncOnBatch,
+    FsyncNever,
 }
 
 pub struct Wal {
@@ -19,11 +19,12 @@ pub struct Wal {
 }
 
 impl Wal {
-    pub fn new(path: &str) -> std::io::Result<Self> {
-        Self::with_sync_mode(path, SyncMode::Always)
+    pub fn new<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+        Self::with_sync_mode(path, SyncMode::FsyncAlways)
     }
 
-    pub fn with_sync_mode(path: &str, sync_mode: SyncMode) -> std::io::Result<Self> {
+    pub fn with_sync_mode<P: AsRef<Path>>(path: P, sync_mode: SyncMode) -> std::io::Result<Self> {
+        let path = path.as_ref();
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -31,7 +32,7 @@ impl Wal {
         let size = file.metadata()?.len();
         Ok(Wal {
             file: BufWriter::new(file),
-            path: PathBuf::from(path),
+            path: path.to_path_buf(),
             size,
             sync_mode,
         })
@@ -48,12 +49,12 @@ impl Wal {
     pub fn append(&mut self, record: &Record) -> std::io::Result<()> {
         let data = record.encode();
 
-        self.size += data.len() as u64;
         self.file.write_all(&data)?;
+        self.size += data.len() as u64;
         self.file.flush()?;
 
-        if self.sync_mode == SyncMode::Always {
-            self.file.get_ref().sync_all()?;
+        if self.sync_mode == SyncMode::FsyncAlways {
+            self.file.get_ref().sync_data()?;
         }
         Ok(())
     }
@@ -61,26 +62,31 @@ impl Wal {
     pub fn append_batch(&mut self, records: &[Record]) -> std::io::Result<()> {
         for record in records {
             let data = record.encode();
-            self.size += data.len() as u64;
             self.file.write_all(&data)?;
+            self.size += data.len() as u64;
         }
 
         self.file.flush()?;
 
-        if self.sync_mode != SyncMode::Never {
-            self.file.get_ref().sync_all()?;
+        if self.sync_mode != SyncMode::FsyncNever {
+            self.file.get_ref().sync_data()?;
         }
         Ok(())
     }
 
-    pub fn iter(path: &str) -> Result<WalIter, RecordError> {
-        let file = File::open(path)?;
-
-        Ok(WalIter { reader: std::io::BufReader::new(file) })
-    }
-
-    pub fn recover(path: &str) -> Result<Vec<Record>, RecordError> {
-        Self::iter(path)?.collect()
+    pub fn recover<P: AsRef<Path>>(path: P) -> Result<Vec<Record>, RecordError> {
+        let mut out = Vec::new();
+        for item in WalIter::open(path)? {
+            match item {
+                Ok(record) => out.push(record),
+                Err(RecordError::Truncated) => {
+                    // log here: tracing::warn!("WAL truncated, stopping replay");
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
     }
 
     pub fn delete(self) -> std::io::Result<()> {
@@ -94,6 +100,13 @@ pub struct WalIter {
     reader: std::io::BufReader<File>,
 }
 
+impl WalIter {
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RecordError> {
+        let file = File::open(path)?;
+        Ok(WalIter { reader: BufReader::new(file) })
+    }
+}
+
 impl Iterator for WalIter {
     type Item = Result<Record, RecordError>;
 
@@ -101,7 +114,6 @@ impl Iterator for WalIter {
         match Record::decode(&mut self.reader) {
             Ok(Some(record)) => Some(Ok(record)),
             Ok(None) => None,
-            Err(RecordError::Truncated) => None,
             Err(e) => Some(Err(e)),
         }
     }
